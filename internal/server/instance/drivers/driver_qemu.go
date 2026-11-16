@@ -9195,6 +9195,26 @@ func (d *qemu) cleanup() {
 	_ = os.RemoveAll(d.ShmountsPath())
 }
 
+// devicesHandOver lets devices release what the target of a live migration takes over.
+func (d *qemu) devicesHandOver() {
+	for _, entry := range d.expandedDevices.Sorted() {
+		dev, err := d.deviceLoad(d, entry.Name, entry.Config, false)
+		if err != nil {
+			continue
+		}
+
+		handOver, ok := dev.(device.HandOver)
+		if !ok {
+			continue
+		}
+
+		err = handOver.HandOver()
+		if err != nil {
+			d.logger.Warn("Failed handing over device", logger.Ctx{"device": entry.Name, "err": err})
+		}
+	}
+}
+
 // cleanupDevices performs any needed device cleanup steps when instance is stopped.
 // Must be called before root volume is unmounted.
 func (d *qemu) cleanupDevices() {
@@ -10980,6 +11000,9 @@ func (d *qemu) migrateSendLive(ctx context.Context, pool storagePools.Pool, clus
 	reverter.Success()
 
 	if clusterMoveSourceName != "" {
+		// Release resources such as host routes right away, so they don't compete with the target.
+		d.devicesHandOver()
+
 		// If doing an intra-cluster member move then we will be deleting the instance on the source,
 		// so lets just stop it after migration is completed.
 		err = d.Stop(false)
