@@ -82,6 +82,12 @@ type device interface {
 	validateConfig(instance.ConfigReader, bool) error
 }
 
+// HandOver provides the ability for a device to release what the target of a live migration takes over.
+type HandOver interface {
+	// HandOver is called on the source once the live migration can no longer be reverted.
+	HandOver() error
+}
+
 // NICState provides the ability to access NIC state.
 type NICState interface {
 	State() (*api.InstanceStateNetwork, error)
