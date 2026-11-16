@@ -990,6 +990,50 @@ func (d *nicRouted) Stop() (*deviceConfig.RunConfig, error) {
 	return &runConf, nil
 }
 
+// HandOver withdraws the host routes and neighbor proxy entries once a live migration target has taken over.
+func (d *nicRouted) HandOver() error {
+	networkVethFillFromVolatile(d.config, d.volatileGet())
+
+	if d.config["parent"] != "" {
+		d.effectiveParentName = network.GetHostDevice(d.config["parent"], d.config["vlan"])
+	}
+
+	d.removeNeighProxies()
+
+	if !network.InterfaceExists(d.config["host_name"]) {
+		return nil
+	}
+
+	// Taking the host interface down removes all routes through it, in every table.
+	link := &ip.Link{Name: d.config["host_name"]}
+	err := link.SetDown()
+	if err != nil {
+		return fmt.Errorf("Failed to bring down %q: %w", d.config["host_name"], err)
+	}
+
+	return nil
+}
+
+// removeNeighProxies deletes the IP neighbor proxy entries on the parent.
+func (d *nicRouted) removeNeighProxies() {
+	if d.effectiveParentName == "" {
+		return
+	}
+
+	for _, key := range []string{"ipv4.address", "ipv6.address"} {
+		for _, addr := range util.SplitNTrimSpace(d.config[key], ",", -1, true) {
+			address := net.ParseIP(addr)
+
+			neighProxy := &ip.NeighProxy{
+				DevName: d.neighProxyDevice(address),
+				Addr:    address,
+			}
+
+			_ = neighProxy.Delete()
+		}
+	}
+}
+
 // postStop is run after the device is removed from the instance.
 func (d *nicRouted) postStop() error {
 	defer func() {
@@ -1018,21 +1062,7 @@ func (d *nicRouted) postStop() error {
 		}
 	}
 
-	// Delete IP neighbor proxy entries on the parent.
-	if d.effectiveParentName != "" {
-		for _, key := range []string{"ipv4.address", "ipv6.address"} {
-			for _, addr := range util.SplitNTrimSpace(d.config[key], ",", -1, true) {
-				address := net.ParseIP(addr)
-
-				neighProxy := &ip.NeighProxy{
-					DevName: d.neighProxyDevice(address),
-					Addr:    address,
-				}
-
-				_ = neighProxy.Delete()
-			}
-		}
-	}
+	d.removeNeighProxies()
 
 	// This will delete the parent interface if we created it for VLAN parent.
 	if util.IsTrue(v["last_state.created"]) {
