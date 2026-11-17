@@ -2,6 +2,7 @@ package device
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -637,6 +638,11 @@ func (d *nicRouted) Start() (*deviceConfig.RunConfig, error) {
 
 	reverter.Add(func() { _ = network.InterfaceRemove(saveData["host_name"]) })
 
+	err = NetworkSetDevMAC(saveData["host_name"], d.hostMAC())
+	if err != nil {
+		return nil, fmt.Errorf("Failed setting the MAC address of %q: %w", saveData["host_name"], err)
+	}
+
 	// Populate device config with volatile fields if needed.
 	networkVethFillFromVolatile(d.config, saveData)
 
@@ -988,6 +994,17 @@ func (d *nicRouted) Stop() (*deviceConfig.RunConfig, error) {
 	}
 
 	return &runConf, nil
+}
+
+// hostMAC returns the MAC address of the host-side interface. It's derived from the instance and device so that it's
+// unique per NIC but stays the same across migrations, keeping the gateway's neighbor entry in the instance valid.
+func (d *nicRouted) hostMAC() string {
+	hash := sha256.Sum256([]byte(d.inst.LocalConfig()["volatile.uuid"] + "/" + d.name))
+
+	// Make it a locally administered unicast address.
+	hash[0] = (hash[0] | 0x02) &^ 0x01
+
+	return net.HardwareAddr(hash[:6]).String()
 }
 
 // HandOver withdraws the host routes and neighbor proxy entries once a live migration target has taken over.
