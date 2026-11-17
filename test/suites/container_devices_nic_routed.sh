@@ -138,6 +138,11 @@ test_container_devices_nic_routed() {
         false
     fi
 
+    # Check the host-side MAC address stays the same when the NIC is recreated.
+    hostMAC=$(cat "/sys/class/net/$(incus config get "${ctName}" volatile.eth0.host_name)/address")
+    incus restart "${ctName}" --force
+    [ "$(cat "/sys/class/net/$(incus config get "${ctName}" volatile.eth0.host_name)/address")" = "${hostMAC}" ]
+
     incus stop "${ctName}" --force
 
     # Check neighbor proxy entries removed from parent interface.
